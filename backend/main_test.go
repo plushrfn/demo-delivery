@@ -2,9 +2,20 @@ package main
 
 import (
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 )
+
+func TestFrontendTemplateMatchesEmbeddedPage(t *testing.T) {
+	frontend, err := os.ReadFile("../frontend/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(frontend) != pageHTML {
+		t.Fatal("frontend/index.html differs from embedded page.html")
+	}
+}
 
 // Вектор из RFC 7636, Appendix B: challenge для известного verifier.
 func TestPKCEChallengeMatchesRFC7636(t *testing.T) {
@@ -30,10 +41,11 @@ func TestNewVerifierIsURLSafeAndLongEnough(t *testing.T) {
 
 func TestAuthorizeURLContainsPKCEParams(t *testing.T) {
 	cfg := config{
-		VaultURL:    "http://localhost:8080",
-		ClientID:    "delivery",
-		RedirectURI: "http://localhost:8090/callback",
-		Scopes:      []string{"full_name", "email"},
+		VaultURL:       "http://localhost:8080",
+		PublicVaultURL: "http://localhost:8080",
+		ClientID:       "delivery",
+		RedirectURI:    "http://localhost:8090/callback",
+		Scopes:         []string{"full_name", "email"},
 	}
 	u, err := url.Parse(authorizeURL(cfg, "challenge-xyz", "state-abc"))
 	if err != nil {
@@ -59,7 +71,7 @@ func TestAuthorizeURLContainsPKCEParams(t *testing.T) {
 }
 
 func TestLoadConfigDefaultsAndScopes(t *testing.T) {
-	for _, name := range []string{"PORT", "VAULT_URL", "CLIENT_ID", "REDIRECT_URI", "SCOPES"} {
+	for _, name := range []string{"PORT", "VAULT_URL", "PUBLIC_VAULT_URL", "CLIENT_ID", "REDIRECT_URI", "SCOPES"} {
 		t.Setenv(name, "")
 	}
 	cfg, err := loadConfig()
@@ -67,7 +79,7 @@ func TestLoadConfigDefaultsAndScopes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.Port != "8090" || cfg.VaultURL != "http://localhost:8080" ||
-		cfg.ClientID != "delivery" || cfg.RedirectURI != "http://localhost:8090/callback" {
+		cfg.PublicVaultURL != "http://localhost:3000/api" || cfg.ClientID != "delivery" || cfg.RedirectURI != "http://localhost:8090/callback" {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
 	if len(cfg.Scopes) != 4 || cfg.Scopes[0] != "full_name" {

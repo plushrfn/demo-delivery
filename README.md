@@ -8,8 +8,7 @@ Demo-сервис, демонстрирующий вход через Vault по
 - `backend/` - Go-сервис: OAuth Authorization Code + PKCE, получение
   разрешённых полей и изменений; отдаёт и простые
   HTML-страницы для показа.
-- `frontend/` - папка для интерфейса demo-сервиса;
-  сейчас заглушка.
+- `frontend/` - HTML-шаблон интерфейса demo-сервиса.
 - `docker-compose.yml` - запуск сервиса в контейнере; `backend/Dockerfile`
   собирает образ.
 
@@ -59,6 +58,8 @@ docker compose up --build
 
 ## Настройка
 
-Переменные окружения: `PORT`, `VAULT_URL`, `CLIENT_ID`, `REDIRECT_URI`,
+Переменные окружения: `PORT`, `VAULT_URL`, `PUBLIC_VAULT_URL`, `CLIENT_ID`, `REDIRECT_URI`,
 `SCOPES` - см. `.env.example`. Токен хранится только в HttpOnly cookie
 сервиса и не попадает в HTML.
+
+`VAULT_URL` задаёт адрес API для запросов backend. `PUBLIC_VAULT_URL` задаёт адрес для перехода пользователя на авторизацию. По умолчанию он равен `http://localhost:3000/api`, чтобы браузер использовал веб-клиент PDV.

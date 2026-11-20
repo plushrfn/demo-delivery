@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Доставка — demo-сервис</title>
+<style>
+body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #111827; }
+h1 { font-size: 1.6rem; }
+.badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.8rem; }
+.sync { background: #DBEAFE; color: #1E40AF; }
+.read { background: #F3F4F6; color: #4B5563; }
+.revoked { background: #FEE2E2; color: #991B1B; }
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+td, th { border: 1px solid #E5E7EB; padding: 0.5rem; text-align: left; }
+.msg { padding: 0.75rem 1rem; border-radius: 8px; background: #FFFBEB; border: 1px solid #FDE68A; }
+.btn { display: inline-block; margin-right: 0.5rem; padding: 0.5rem 1rem; border-radius: 6px; background: #047857; color: #fff; text-decoration: none; }
+</style></head><body>
+<h1>Доставка — demo-сервис</h1>
+{{if .Message}}<div class="msg">{{.Message}}</div>{{end}}
+{{if not .LoggedIn}}
+  <p>Сервис получает ваши данные из Vault только с вашего согласия.</p>
+  <a class="btn" href="/login">Войти через Vault</a>
+{{else}}
+  <p>Согласие: <span class="badge {{if eq .ConsentStatus "revoked"}}revoked{{else if eq .ConsentAccessType "sync"}}sync{{else}}read{{end}}">{{.ConsentStatus}}{{if ne .ConsentStatus "revoked"}} · {{if eq .ConsentAccessType "sync"}}Синхронизация{{else}}Только чтение{{end}}{{end}}</span></p>
+  <p>Разрешённые поля: {{range .Scopes}}{{.}} {{end}}</p>
+  <h2>Данные из Vault</h2>
+  {{if .Fields}}
+  <table><tr><th>Поле</th><th>Значение</th><th>Версия</th></tr>
+  {{range .Fields}}<tr><td>{{.Label}}</td><td>{{.Value}}</td><td>{{.Version}}</td></tr>{{end}}
+  </table>
+  {{else}}<p>Данные пока не получены.</p>{{end}}
+  {{if .SyncSince}}
+  <h2>Синхронизация</h2>
+  {{if .Changes}}
+  <table><tr><th>Поле</th><th>Новое значение</th><th>Версия</th></tr>
+  {{range .Changes}}<tr><td>{{.Label}}</td><td>{{.Value}}</td><td>{{.Version}}</td></tr>{{end}}
+  </table>
+  {{else}}<p>Обновлённых значений нет.</p>{{end}}
+  {{if .Deleted}}<p>Удалённые поля: {{range .Deleted}}{{.}} {{end}}</p>{{end}}
+  {{end}}
+  <p><a class="btn" href="/">Обновить и синхронизировать</a></p>
+  <form method="post" action="/logout"><button class="btn" type="submit" style="background:#B91C1C">Выйти</button></form>
+{{end}}
+</body></html>

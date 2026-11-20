@@ -6,6 +6,7 @@ package main
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -21,19 +22,21 @@ import (
 
 // config — настройки demo-сервиса из переменных окружения.
 type config struct {
-	Port        string
-	VaultURL    string
-	ClientID    string
-	RedirectURI string
-	Scopes      []string
+	Port           string
+	VaultURL       string
+	PublicVaultURL string
+	ClientID       string
+	RedirectURI    string
+	Scopes         []string
 }
 
 func loadConfig() (config, error) {
 	cfg := config{
-		Port:        envOr("PORT", "8090"),
-		VaultURL:    strings.TrimRight(envOr("VAULT_URL", "http://localhost:8080"), "/"),
-		ClientID:    envOr("CLIENT_ID", "delivery"),
-		RedirectURI: envOr("REDIRECT_URI", "http://localhost:8090/callback"),
+		Port:           envOr("PORT", "8090"),
+		VaultURL:       strings.TrimRight(envOr("VAULT_URL", "http://localhost:8080"), "/"),
+		PublicVaultURL: strings.TrimRight(envOr("PUBLIC_VAULT_URL", "http://localhost:3000/api"), "/"),
+		ClientID:       envOr("CLIENT_ID", "delivery"),
+		RedirectURI:    envOr("REDIRECT_URI", "http://localhost:8090/callback"),
 	}
 	for _, scope := range strings.Split(envOr("SCOPES", "full_name,email,phone,address"), ",") {
 		if scope = strings.TrimSpace(scope); scope != "" {
@@ -94,7 +97,7 @@ func authorizeURL(cfg config, challenge, state string) string {
 	q.Set("code_challenge", challenge)
 	q.Set("code_challenge_method", "S256")
 	q.Set("state", state)
-	return cfg.VaultURL + "/oauth/authorize?" + q.Encode()
+	return cfg.PublicVaultURL + "/oauth/authorize?" + q.Encode()
 }
 
 // JSON-формы ответов Vault (BE-013 / BE-014).
@@ -122,6 +125,7 @@ type consentResponse struct {
 type syncResponse struct {
 	Since   string     `json:"since"`
 	Changes []pdvField `json:"changes"`
+	Deleted []string   `json:"deleted"`
 }
 
 type tokenResponse struct {
@@ -183,6 +187,7 @@ type pageData struct {
 	Scopes            []string
 	Fields            []pdvField
 	Changes           []pdvField
+	Deleted           []string
 	SyncSince         string
 	Message           string
 	NeedSync          bool
@@ -246,6 +251,7 @@ func (a *app) sync(w http.ResponseWriter, r *http.Request, token string, data *p
 	switch status {
 	case http.StatusOK:
 		data.Changes = result.Changes
+		data.Deleted = result.Deleted
 		data.SyncSince = result.Since
 		if result.Since != "" {
 			http.SetCookie(w, &http.Cookie{Name: cookieCursor, Value: result.Since, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: 86400})
@@ -350,46 +356,10 @@ func clearCookie(w http.ResponseWriter, name string) {
 	http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 }
 
-var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><title>Доставка — demo-сервис</title>
-<style>
-body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #111827; }
-h1 { font-size: 1.6rem; }
-.badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.8rem; }
-.sync { background: #DBEAFE; color: #1E40AF; }
-.read { background: #F3F4F6; color: #4B5563; }
-.revoked { background: #FEE2E2; color: #991B1B; }
-table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
-td, th { border: 1px solid #E5E7EB; padding: 0.5rem; text-align: left; }
-.msg { padding: 0.75rem 1rem; border-radius: 8px; background: #FFFBEB; border: 1px solid #FDE68A; }
-.btn { display: inline-block; margin-right: 0.5rem; padding: 0.5rem 1rem; border-radius: 6px; background: #047857; color: #fff; text-decoration: none; }
-</style></head><body>
-<h1>Доставка — demo-сервис</h1>
-{{if .Message}}<div class="msg">{{.Message}}</div>{{end}}
-{{if not .LoggedIn}}
-  <p>Сервис получает ваши данные из Vault только с вашего согласия.</p>
-  <a class="btn" href="/login">Войти через Vault</a>
-{{else}}
-  <p>Согласие: <span class="badge {{if eq .ConsentStatus "revoked"}}revoked{{else if eq .ConsentAccessType "sync"}}sync{{else}}read{{end}}">{{.ConsentStatus}}{{if ne .ConsentStatus "revoked"}} · {{if eq .ConsentAccessType "sync"}}Синхронизация{{else}}Только чтение{{end}}{{end}}</span></p>
-  <p>Разрешённые поля: {{range .Scopes}}{{.}} {{end}}</p>
-  <h2>Данные из Vault</h2>
-  {{if .Fields}}
-  <table><tr><th>Поле</th><th>Значение</th><th>Версия</th></tr>
-  {{range .Fields}}<tr><td>{{.Label}}</td><td>{{.Value}}</td><td>{{.Version}}</td></tr>{{end}}
-  </table>
-  {{else}}<p>Данные пока не получены.</p>{{end}}
-  {{if .SyncSince}}
-  <h2>Синхронизация</h2>
-  {{if .Changes}}
-  <table><tr><th>Поле</th><th>Новое значение</th><th>Версия</th></tr>
-  {{range .Changes}}<tr><td>{{.Label}}</td><td>{{.Value}}</td><td>{{.Version}}</td></tr>{{end}}
-  </table>
-  {{else}}<p>Изменений с последней синхронизации нет.</p>{{end}}
-  {{end}}
-  <p><a class="btn" href="/">Обновить и синхронизировать</a></p>
-  <form method="post" action="/logout"><button class="btn" type="submit" style="background:#B91C1C">Выйти</button></form>
-{{end}}
-</body></html>`))
+//go:embed page.html
+var pageHTML string
+
+var pageTemplate = template.Must(template.New("page").Parse(pageHTML))
 
 func renderPage(w http.ResponseWriter, data pageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
