@@ -8,6 +8,7 @@ services:
       # Внутри контейнера Vault доступен на хосте; на Linux замените на
       # адрес машины с проектом (например, http://172.17.0.1:8080).
       VAULT_URL: ${VAULT_URL:-http://host.docker.internal:8080}
+      PUBLIC_VAULT_URL: ${PUBLIC_VAULT_URL:-http://localhost:3000/api}
       CLIENT_ID: ${CLIENT_ID:-delivery}
       REDIRECT_URI: ${REDIRECT_URI:-http://localhost:8090/callback}
       SCOPES: ${SCOPES:-full_name,email,phone,address}

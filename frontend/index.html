@@ -1,24 +1,81 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <title>Доставка — интерфейс (заглушка)</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 4rem auto; padding: 0 1rem; color: #111827; }
-    .box { border: 1px dashed #9CA3AF; border-radius: 12px; padding: 1.5rem; background: #F9FAFB; }
-  </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Быстрая Доставка — demo-сервис PDV</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
 </head>
 <body>
-  <div class="box">
-    <h1>Доставка — интерфейс demo-сервиса</h1>
-    <p>Эта папка зарезервирована под задачу FE-007 «Сверстать интерфейс
-    demo-сервиса "Доставка"» (Никита Комаров).</p>
-    <p>Пока интерфейс не свёрстан, сервис доступен по адресу
-    <a href="http://localhost:8090/">http://localhost:8090/</a> — там backend
-    отдаёт простую страницу с данными из Vault и блоком синхронизации.</p>
-    <p>Контракты API, на которые опирается интерфейс, описаны в
-    Swagger-документации Vault: <a href="http://localhost:8080/swagger/index.html">/swagger/index.html</a>
-    (эндпоинты <code>/services/consent</code>, <code>/services/data</code>, <code>/services/sync</code>).</p>
-  </div>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><span class="brand-badge" aria-hidden="true">🚚</span><div><strong>Быстрая Доставка</strong><span class="brand-sub">Demo-сервис</span></div></div>
+      <div class="topbar-actions">
+        {{if .LoggedIn}}
+          {{if eq .ConsentStatus "revoked"}}<span class="pill pill-danger">Согласие отозвано</span>
+          {{else if eq .ConsentStatus "active"}}<span class="pill pill-ok">Подключено</span>
+          {{else}}<span class="pill pill-warn">Статус недоступен</span>{{end}}
+          <form method="post" action="/logout"><button class="btn btn-ghost" type="submit">Отключить локально</button></form>
+        {{else}}<span class="pill pill-muted">Не подключено</span>{{end}}
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    {{if .Message}}<div class="alert alert-warn" role="status">{{.Message}}</div>{{end}}
+    <div id="selection-error" class="alert alert-error hidden" role="alert"></div>
+    <section class="card">
+      <h1>Оформление доставки через Personal Data Vault</h1>
+      {{if .LoggedIn}}
+        <p class="muted">Сервис получает только те данные, на которые вы дали согласие в Vault.</p>
+        <div class="actions-row"><a class="btn btn-secondary" href="/">Обновить данные и статус</a>
+          {{if and (eq .ConsentStatus "active") (eq .ConsentAccessType "sync")}}<a class="btn btn-secondary" href="/">Синхронизировать изменения</a>{{end}}
+        </div>
+      {{else}}
+        <p class="muted">Выберите поля, которые сервис «Доставка» запросит у вашего хранилища PDV. После подтверждения согласия данные загрузятся автоматически.</p>
+        <form id="connect-form" method="get" action="/login">
+          <input type="hidden" name="selection" value="1">
+          <fieldset class="scope-fieldset"><legend>Поля для запроса</legend>
+            <div class="scopes-grid">{{range .Options}}
+              <label class="scope-item"><input type="checkbox" name="scope" value="{{.Key}}" checked> <span><strong>{{.Label}}</strong></span></label>
+            {{end}}</div>
+          </fieldset>
+          <div class="actions-row"><button class="btn btn-primary" type="submit">Подключить Personal Data Vault</button></div>
+        </form>
+      {{end}}
+    </section>
+
+    <div class="grid-two">
+      <section class="card">
+        <h2>Статус согласия</h2>
+        {{if .LoggedIn}}
+          {{if .ConsentStatus}}
+            <div class="kv-list">
+              <div class="kv-row"><span class="kv-key">Статус</span><span class="kv-val">{{if eq .ConsentStatus "active"}}Активно{{else if eq .ConsentStatus "revoked"}}Отозвано{{else}}{{.ConsentStatus}}{{end}}</span></div>
+              {{if eq .ConsentStatus "active"}}<div class="kv-row"><span class="kv-key">Тип доступа</span><span class="kv-val">{{if eq .ConsentAccessType "sync"}}Синхронизация{{else}}Только чтение{{end}}</span></div>{{end}}
+              <div class="kv-row"><span class="kv-key">Разрешённые поля</span><span class="kv-val">{{range .Scopes}}{{fieldLabel .}} {{else}}Нет{{end}}</span></div>
+            </div>
+          {{else}}<p class="empty-state">Не удалось получить статус согласия.</p>{{end}}
+        {{else}}<p class="empty-state">Подключите PDV, чтобы увидеть статус согласия и выданные права.</p>{{end}}
+      </section>
+      <section class="card">
+        <h2>Данные получателя</h2>
+        {{if .Fields}}<div class="kv-list">{{range .Fields}}
+          <div class="kv-row"><span class="kv-key">{{.Label}}</span><span class="kv-val">{{.Value}} <span class="caption muted">· версия {{.Version}}</span></span></div>
+        {{end}}</div>{{else}}<p class="empty-state">Данные ещё не загружены.</p>{{end}}
+      </section>
+    </div>
+
+    <section class="card">
+      <div class="card-header-row"><h2>Журнал синхронизации</h2>{{if .SyncSince}}<span class="caption muted">Последняя проверка: {{.SyncSince}}</span>{{end}}</div>
+      {{if .SyncSince}}
+        {{if .Changes}}<div class="kv-list">{{range .Changes}}
+          <div class="kv-row"><span class="kv-key">{{.Label}}</span><span class="kv-val">{{.Value}} <span class="caption muted">· версия {{.Version}}</span></span></div>
+        {{end}}</div>{{else}}<p class="empty-state">Обновлённых значений нет.</p>{{end}}
+        {{if .Deleted}}<p class="muted">Удалённые поля: {{range .Deleted}}{{fieldLabel .}} {{end}}</p>{{end}}
+      {{else}}<p class="empty-state">После подключения и предоставления права синхронизации здесь появятся изменения данных.</p>{{end}}
+    </section>
+  </main>
 </body>
 </html>
