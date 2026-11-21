@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
@@ -14,6 +16,104 @@ func TestFrontendTemplateMatchesEmbeddedPage(t *testing.T) {
 	}
 	if string(frontend) != pageHTML {
 		t.Fatal("frontend/index.html differs from embedded page.html")
+	}
+	styles, err := os.ReadFile("../frontend/styles.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(styles) != pageStyles {
+		t.Fatal("frontend/styles.css differs from embedded styles.css")
+	}
+	script, err := os.ReadFile("../frontend/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(script) != pageScript {
+		t.Fatal("frontend/app.js differs from embedded app.js")
+	}
+}
+
+func TestLoginRequestsSelectedAllowedFields(t *testing.T) {
+	a := &app{cfg: config{PublicVaultURL: "http://localhost:3000/api", ClientID: "delivery", RedirectURI: "http://localhost:8090/callback", Scopes: []string{"full_name", "email", "phone", "address"}}}
+	for _, tc := range []struct {
+		path       string
+		wantStatus int
+		wantScope  string
+	}{
+		{"/login?selection=1&scope=email&scope=address", http.StatusSeeOther, "email address"},
+		{"/login", http.StatusSeeOther, "full_name email phone address"},
+		{"/login?selection=1", http.StatusBadRequest, ""},
+		{"/login?selection=1&scope=email&scope=passport", http.StatusBadRequest, ""},
+		{"/login?selection=1&scope=email&scope=email", http.StatusBadRequest, ""},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			a.login(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.wantStatus)
+			}
+			if tc.wantStatus == http.StatusSeeOther {
+				u, err := url.Parse(rec.Header().Get("Location"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := u.Query().Get("scope"); got != tc.wantScope {
+					t.Fatalf("scope = %q", got)
+				}
+				if u.Query().Get("code_challenge_method") != "S256" {
+					t.Fatal("missing PKCE")
+				}
+			}
+		})
+	}
+}
+
+func TestHomeUsesBackendAndKeepsTokenOutOfHTML(t *testing.T) {
+	const token = "secret-test-token"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			t.Errorf("missing token on %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/services/consent":
+			_, _ = w.Write([]byte(`{"status":"active","access_type":"sync","scopes":["email"]}`))
+		case "/services/data":
+			_, _ = w.Write([]byte(`{"fields":[{"key":"email","label":"Email","value":"<script>alert(1)</script>","version":2}]}`))
+		case "/services/sync":
+			_, _ = w.Write([]byte(`{"since":"2026-11-21T00:00:00Z","changes":[],"deleted":["email"]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	a := &app{cfg: config{VaultURL: server.URL, Scopes: []string{"email"}}, client: server.Client()}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: cookieToken, Value: token})
+	rec := httptest.NewRecorder()
+	a.home(rec, req)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || !strings.Contains(body, "Удалённые поля") || !strings.Contains(body, "&lt;script&gt;") {
+		t.Fatalf("unexpected response status=%d", rec.Code)
+	}
+	if strings.Contains(body, token) || strings.Contains(body, "<script>alert(1)</script>") {
+		t.Fatal("token or unescaped data in page")
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("sensitive page must not be cached")
+	}
+}
+
+func TestExpiredTokenShowsReconnect(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusUnauthorized) }))
+	defer server.Close()
+	a := &app{cfg: config{VaultURL: server.URL, Scopes: []string{"email"}}, client: server.Client()}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: cookieToken, Value: "expired-token"})
+	rec := httptest.NewRecorder()
+	a.home(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Сессия истекла") || !strings.Contains(rec.Body.String(), "Подключить Personal Data Vault") {
+		t.Fatal("expired session must offer reconnection")
 	}
 }
 

@@ -5,17 +5,16 @@ Demo-сервис, демонстрирующий вход через Vault по
 
 ## Структура
 
-- `backend/` - Go-сервис: OAuth Authorization Code + PKCE, получение
-  разрешённых полей и изменений; отдаёт и простые
-  HTML-страницы для показа.
-- `frontend/` - HTML-шаблон интерфейса demo-сервиса.
+- `backend/` — Go-сервис: OAuth Authorization Code + PKCE, получение
+  разрешённых полей и изменений. Сервер отдаёт страницу и её стили.
+- `frontend/` — интерфейс demo-сервиса, включающий шаблон и стили.
 - `docker-compose.yml` - запуск сервиса в контейнере; `backend/Dockerfile`
   собирает образ.
 
 ## Предусловия
 
-1. Запущен стек PDV: `docker compose up -d --build` в папке `project/`.
-2. В `project/backend/oauth-clients.example.json` есть клиент `delivery`
+1. Запущен стек PDV.
+2. В `backend/oauth-clients.example.json` основного проекта есть клиент `delivery`
    с redirect_uri `http://localhost:8090/callback`.
 3. В PDV зарегистрирован пользователь, в Vault заполнены поля
    (`full_name`, `email`, `phone`, `address`).
@@ -33,23 +32,19 @@ go run .
 docker compose up --build
 ```
 
-Сервис: http://localhost:8090
+Сервис: http://localhost:8090. При запуске из основного проекта отдельный
+Compose для «Доставки» запускать не нужно.
 
 ## Демо-сценарий
 
-1. Откройте http://localhost:8090 → «Войти через Vault».
+1. Откройте http://localhost:8090, выберите поля и нажмите «Подключить Personal Data Vault».
 2. На экране согласия PDV разрешите запрошенные поля. Сервис получит
    access-токен и покажет данные из Vault.
-3. Чтобы работала синхронизация, в PDV включите для Delivery тип
-   «Синхронизация» (consent access_type = sync):
-   в веб-интерфейсе PDV это можно сделать через API, например:
-
-   ```powershell
-   # session cookie пользователя PDV - из DevTools; id согласия - из GET /consents
-   curl.exe -b "pdv_session=<cookie>" -X PATCH http://localhost:8080/consents/<id> `
-     -H "Content-Type: application/json" `
-     -d '{\"scopes\":[\"full_name\",\"email\",\"phone\",\"address\"],\"access_type\":\"sync\"}'
-   ```
+3. Чтобы работала синхронизация, измените тип согласия Delivery на `sync`
+   через API. В Swagger UI по адресу http://localhost:8080/swagger/index.html
+   выполните `GET /consents` и найдите id согласия. Затем в `PATCH /consents/{id}`
+   передайте его текущие `scopes` и `access_type: "sync"`. Для этого нужно быть
+   авторизованным в PDV в том же браузере.
 
 4. Измените поле в Vault (например, адрес), затем обновите страницу
    сервиса - блок «Синхронизация» покажет изменённое поле с новой версией.
@@ -59,7 +54,6 @@ docker compose up --build
 ## Настройка
 
 Переменные окружения: `PORT`, `VAULT_URL`, `PUBLIC_VAULT_URL`, `CLIENT_ID`, `REDIRECT_URI`,
-`SCOPES` - см. `.env.example`. Токен хранится только в HttpOnly cookie
-сервиса и не попадает в HTML.
+`SCOPES`. Токен хранится в HttpOnly-cookie сервиса и не попадает в HTML.
 
 `VAULT_URL` задаёт адрес API для запросов backend. `PUBLIC_VAULT_URL` задаёт адрес для перехода пользователя на авторизацию. По умолчанию он равен `http://localhost:3000/api`, чтобы браузер использовал веб-клиент PDV.

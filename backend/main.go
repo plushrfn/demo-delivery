@@ -150,13 +150,22 @@ func main() {
 	mux.HandleFunc("GET /login", a.login)
 	mux.HandleFunc("GET /callback", a.callback)
 	mux.HandleFunc("POST /logout", a.logout)
+	mux.HandleFunc("GET /styles.css", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		_, _ = w.Write([]byte(pageStyles))
+	})
+	mux.HandleFunc("GET /app.js", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		_, _ = w.Write([]byte(pageScript))
+	})
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
 
 	log.Printf("delivery demo listening on :%s (vault: %s, client: %s)", cfg.Port, cfg.VaultURL, cfg.ClientID)
-	log.Fatal(http.ListenAndServe(":"+cfg.Port, mux))
+	server := &http.Server{Addr: ":" + cfg.Port, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	log.Fatal(server.ListenAndServe())
 }
 
 // apiGet выполняет GET к Vault с Bearer-токеном и разбирает JSON в dst.
@@ -191,10 +200,24 @@ type pageData struct {
 	SyncSince         string
 	Message           string
 	NeedSync          bool
+	Options           []scopeOption
+}
+
+type scopeOption struct{ Key, Label string }
+
+func fieldLabel(key string) string {
+	labels := map[string]string{"full_name": "ФИО", "email": "Email", "phone": "Телефон", "address": "Адрес доставки", "birth_date": "Дата рождения"}
+	if label, ok := labels[key]; ok {
+		return label
+	}
+	return key
 }
 
 func (a *app) home(w http.ResponseWriter, r *http.Request) {
 	data := pageData{}
+	for _, scope := range a.cfg.Scopes {
+		data.Options = append(data.Options, scopeOption{Key: scope, Label: fieldLabel(scope)})
+	}
 	token := cookieValue(r, cookieToken)
 	if token == "" {
 		data.Message = "Войдите через Vault, чтобы сервис получил ваши данные."
@@ -216,6 +239,13 @@ func (a *app) home(w http.ResponseWriter, r *http.Request) {
 			data.Message = "Согласие активно (только чтение). Для синхронизации изменений включите тип «Синхронизация» для сервиса Delivery в Vault."
 			data.NeedSync = true
 		}
+	} else if status == http.StatusUnauthorized {
+		clearCookie(w, cookieToken)
+		clearCookie(w, cookieCursor)
+		data.LoggedIn = false
+		data.Message = "Сессия истекла. Подключите Vault снова."
+		renderPage(w, data)
+		return
 	} else {
 		data.Message = fmt.Sprintf("Статус согласия недоступен (HTTP %d).", status)
 	}
@@ -265,6 +295,27 @@ func (a *app) sync(w http.ResponseWriter, r *http.Request, token string, data *p
 
 // login начинает OAuth: PKCE + state в cookie и редирект на экран согласия.
 func (a *app) login(w http.ResponseWriter, r *http.Request) {
+	cfg := a.cfg
+	if r.URL.Query().Has("selection") {
+		requested := r.URL.Query()["scope"]
+		if len(requested) == 0 || len(requested) > len(a.cfg.Scopes) {
+			http.Error(w, "Выберите хотя бы одно разрешённое поле", http.StatusBadRequest)
+			return
+		}
+		allowed := make(map[string]bool, len(a.cfg.Scopes))
+		for _, scope := range a.cfg.Scopes {
+			allowed[scope] = true
+		}
+		seen := make(map[string]bool, len(requested))
+		for _, scope := range requested {
+			if !allowed[scope] || seen[scope] {
+				http.Error(w, "Недопустимый список полей", http.StatusBadRequest)
+				return
+			}
+			seen[scope] = true
+		}
+		cfg.Scopes = requested
+	}
 	verifier, err := newVerifier()
 	if err != nil {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -277,7 +328,7 @@ func (a *app) login(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: cookieVerifier, Value: verifier, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: 600})
 	http.SetCookie(w, &http.Cookie{Name: cookieState, Value: state, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: 600})
-	http.Redirect(w, r, authorizeURL(a.cfg, pkceChallenge(verifier), state), http.StatusSeeOther)
+	http.Redirect(w, r, authorizeURL(cfg, pkceChallenge(verifier), state), http.StatusSeeOther)
 }
 
 // callback завершает OAuth: проверка state, обмен кода на токен.
@@ -359,7 +410,13 @@ func clearCookie(w http.ResponseWriter, name string) {
 //go:embed page.html
 var pageHTML string
 
-var pageTemplate = template.Must(template.New("page").Parse(pageHTML))
+//go:embed styles.css
+var pageStyles string
+
+//go:embed app.js
+var pageScript string
+
+var pageTemplate = template.Must(template.New("page").Funcs(template.FuncMap{"fieldLabel": fieldLabel}).Parse(pageHTML))
 
 func renderPage(w http.ResponseWriter, data pageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
